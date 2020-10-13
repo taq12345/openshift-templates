@@ -15,7 +15,7 @@ pipeline {
                         String deleteProj = "oc delete project template-test"
                         def delOutput = bat(returnStdout: true , script: deleteProj)
                         print delOutput
-                        sleep 5
+                        sleep 10
                         String createProj = "oc new-project template-test"
                         def createOutput = bat(returnStdout: true , script: createProj) 
                         print createOutput
