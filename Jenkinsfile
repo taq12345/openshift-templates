@@ -1,7 +1,7 @@
 pipeline {
     agent any
     environment {
-        PATH = "C:\\Users\\Talha\\.crc\\bin\\oc"
+        PATH = "C:\\Users\\Talha\\.crc\\bin\\oc;%PATH%"
     }
     stages {
         stage('build') {
