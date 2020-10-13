@@ -1,0 +1,264 @@
+---
+    kind: Template
+    apiVersion: v1
+    metadata:
+      name: nuces-db
+      annotations:
+        openshift.io/display-name: MYSQL Server
+        description: mysql server for NUCES' db
+        tags: quickstart,mysql
+        #iconClass: icon-apache
+        openshift.io/long-description: This template defines resources needed to develop
+          a mysql server, including a build
+          configuration and application deployment configuration.
+        openshift.io/provider-display-name: Red Hat, Inc.
+        openshift.io/support-url: https://access.redhat.com
+        template.openshift.io/bindable: 'false'
+    message: |-
+      The following service(s) have been created in your project: ${NAME}.
+    
+    labels:
+      template: nuces-db
+      app: template-test
+    objects:
+
+    - kind: Secret
+      apiVersion: v1
+      metadata:
+        name: mysecret
+      type: Opaque
+      data:
+        database: dGVzdA==
+        password: c2hvb3Rpbmc=
+
+    - kind: Service
+      apiVersion: v1
+      metadata:
+        name: ${NAME}
+        # labels:
+            # template: mysql-persistent-template
+        # annotations:
+            # template.openshift.io/expose-uri: 'mysql://{.spec.clusterIP}:{.spec.ports[?(.name=="mysql")].port}'
+      spec:
+        ports:
+        - name: ${NAME}
+          protocol: TCP
+          port: 3306
+          targetPort: 3306
+        selector:
+          name: ${NAME}
+
+    # - kind: Route
+    #   apiVersion: v1
+    #   metadata:
+    #     name: "${NAME}"
+    #   spec:
+    #     host: "${APPLICATION_DOMAIN}"
+    #     to:
+    #       kind: Service
+    #       name: "${NAME}"
+
+    - kind: ImageStream
+      apiVersion: v1
+      metadata:
+        name: "${NAME}"
+        annotations:
+          description: Keeps track of changes in the application image
+
+    - kind: PersistentVolumeClaim
+      apiVersion: v1
+      metadata:
+        name: ${NAME}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+        volumeMode: Filesystem
+
+        # volumeName: pv0006
+        # volumeMode: Filesystem
+
+    - kind: BuildConfig
+      apiVersion: v1
+      metadata:
+        name: "${NAME}"
+        annotations:
+          description: Defines how to build the application
+          template.alpha.openshift.io/wait-for-ready: 'true'
+      spec:
+        source:
+          type: Git
+          git:
+            uri: "${SOURCE_REPOSITORY_URL}"
+            ref: "${SOURCE_REPOSITORY_REF}"
+          contextDir: "${CONTEXT_DIR}"
+        strategy:
+          type: Docker
+          dockerStrategy:
+            dockerfilePath: Dockerfile
+            env: 
+              - name: "MYSQL_ROOT_PASSWORD"
+                valueFrom:
+                  secretKeyRef:
+                    name: mysecret
+                    key: password
+              - name: "MYSQL_DATABASE"
+                valueFrom:
+                  secretKeyRef:
+                    name: mysecret
+                    key: database
+        postCommit: {}
+        output:
+          to:
+            kind: ImageStreamTag
+            name: "${NAME}:latest"
+        triggers:
+        - type: ImageChange
+        - type: ConfigChange
+        - type: GitHub
+          github:
+            secret: "${GITHUB_WEBHOOK_SECRET}"
+        - type: Generic
+          generic:
+            secret: "${GENERIC_WEBHOOK_SECRET}"
+    
+    - kind: DeploymentConfig
+      apiVersion: apps.openshift.io/v1
+      metadata:
+        annotations:
+          template.alpha.openshift.io/wait-for-ready: 'true'
+        name: ${NAME}
+      spec:
+        strategy:
+          type: Rolling
+        triggers:
+          - type: ImageChange
+            imageChangeParams:
+              automatic: true
+              containerNames:
+              - ${NAME}
+              from:
+                kind: ImageStreamTag
+                name: "${NAME}:latest"
+          - type: ConfigChange
+        replicas: 1
+        selector:
+          name: ${NAME}
+        template:
+          metadata:
+            labels:
+              name: ${NAME}
+          spec:
+            volumes:
+              - name: mysql-data
+                persistentVolumeClaim:
+                  claimName: ${NAME}
+            containers:
+              - resources:
+                  limits:
+                    memory: "${MEMORY_LIMIT}"
+                  initialDelaySeconds: 5
+                  timeoutSeconds: 1
+                  periodSeconds: 10
+                  successThreshold: 1
+                  failureThreshold: 3
+                name: ${NAME}
+                ports:
+                  - containerPort: 3306
+                    protocol: TCP
+                imagePullPolicy: IfNotPresent
+                volumeMounts:
+                  - name: mysql-data
+                    mountPath: /var/lib/mysql
+                image: " "
+                # env: 
+                #   - name: "MYSQL_ROOT_PASSWORD"
+                #     valueFrom:
+                #       secretKeyRef:
+                #         name: mysecret
+                #         key: password
+                #   - name: "MYSQL_DATABASE"
+                #     valueFrom:
+                #       secretKeyRef:
+                #         name: mysecret
+                #         key: database
+              # readinessProbe:
+              #   timeoutSeconds: 3
+              #   initialDelaySeconds: 3
+              #   httpGet:
+              #     path: "/"
+              #     port: 8080
+              # livenessProbe:
+              #   timeoutSeconds: 3
+              #   initialDelaySeconds: 30
+              #   httpGet:
+              #     path: "/"
+              #     port: 8080            
+       
+    # - kind: HorizontalPodAutoscaler
+    #   apiVersion: autoscaling/v2beta2
+    #   metadata:
+    #     name: hpa-resource-metrics-memory 
+    #     namespace: template-test
+    #   spec:
+    #     scaleTargetRef:
+    #       apiVersion: apps.openshift.io/v1
+    #       kind: DeploymentConfig 
+    #       name: ${NAME} 
+    #     minReplicas: 1 
+    #     maxReplicas: 10 
+    #     metrics: 
+    #     - type: Resource
+    #       resource:
+    #         name: memory 
+    #         target:
+    #           type: AverageValue 
+    #           averageValue: 150Mi
+          
+    parameters:
+    - name: NAME
+      displayName: Name
+      description: The name assigned to all of the frontend objects defined in this template.
+      required: true
+      value: nuces-db
+    - name: NAMESPACE
+      displayName: Namespace
+      description: The OpenShift Namespace where the ImageStream resides.
+      required: true
+      value: openshift
+    - name: MEMORY_LIMIT
+      displayName: Memory Limit
+      description: Maximum amount of memory the container can use.
+      required: true
+      value: 512Mi
+    - name: SOURCE_REPOSITORY_URL
+      displayName: Git Repository URL
+      description: The URL of the repository with your application source code.
+      required: true
+      value: https://github.com/taq12345/nuces-db.git
+    - name: SOURCE_REPOSITORY_REF
+      displayName: Git Reference
+      description: Set this to a branch name, tag or other ref of your repository if you
+        are not using the default branch.
+    - name: CONTEXT_DIR
+      displayName: Context Directory
+      description: Set this to the relative path to your project if it is not in the root
+        of your repository.
+    # - name: APPLICATION_DOMAIN
+    #   displayName: Application Hostname
+    #   description: The exposed hostname that will route to the httpd service, if left
+    #     blank a value will be defaulted.
+    #   value: ''
+    - name: GITHUB_WEBHOOK_SECRET
+      displayName: GitHub Webhook Secret
+      description: Github trigger secret.  A difficult to guess string encoded as part
+        of the webhook URL.  Not encrypted.
+      generate: expression
+      from: "[a-zA-Z0-9]{40}"
+    - name: GENERIC_WEBHOOK_SECRET
+      displayName: Generic Webhook Secret
+      description: A secret string used to configure the Generic webhook.
+      generate: expression
+      from: "[a-zA-Z0-9]{40}"
